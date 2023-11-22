@@ -960,6 +960,11 @@ void GroupingSet::spill() {
   if (sortedAggregations_) {
     sortedAggregations_->clear();
   }
+  for (const auto& agg : distinctAggregations_) {
+    if (agg != nullptr) {
+      agg->clear();
+    }
+  }
   table_->clear();
 }
 
@@ -976,6 +981,17 @@ void GroupingSet::spill(const RowContainerIterator& rowIterator) {
       Spiller::Type::kAggregateOutput, rows, makeSpillType(), spillConfig_);
 
   spiller_->spill(rowIterator);
+
+  if (sortedAggregations_) {
+    sortedAggregations_->clear();
+  }
+
+  for (const auto& agg : distinctAggregations_) {
+    if (agg != nullptr) {
+      agg->clear();
+    }
+  }
+
   table_->clear();
 }
 
@@ -1125,6 +1141,13 @@ void GroupingSet::initializeRow(SpillMergeStream& stream, char* row) {
     sortedAggregations_->initializeNewGroups(
         &row, folly::Range<const vector_size_t*>(&zero, 1));
   }
+
+  for (const auto& agg : distinctAggregations_) {
+    if (agg != nullptr) {
+      agg->initializeNewGroups(
+          &row, folly::Range<const vector_size_t*>(&zero, 1));
+    }
+  }
 }
 
 void GroupingSet::extractSpillResult(const RowVectorPtr& result) {
@@ -1155,11 +1178,20 @@ void GroupingSet::updateRow(SpillMergeStream& input, char* row) {
   }
   mergeSelection_.setValid(input.currentIndex(), false);
 
+  int index = aggregates_.size() + keyChannels_.size();
   if (sortedAggregations_ != nullptr) {
-    const auto& vector =
-        input.current().childAt(aggregates_.size() + keyChannels_.size());
+    const auto& vector = input.current().childAt(index);
     sortedAggregations_->addSingleGroupSpillInput(
         row, vector, input.currentIndex());
+    index++;
+  }
+
+  for (const auto& agg : distinctAggregations_) {
+    if (agg != nullptr) {
+      agg->addSingleGroupSpillInput(
+          row, input.current().childAt(index), input.currentIndex());
+      index++;
+    }
   }
 }
 

@@ -43,9 +43,9 @@ class TypedDistinctAggregations : public DistinctAggregations {
         sizeof(AccumulatorType),
         false, // usesExternalMemory
         1, // alignment
-        nullptr,
-        [](folly::Range<char**> /*groups*/, VectorPtr& /*result*/) {
-          VELOX_UNREACHABLE();
+        VARBINARY(),
+        [this](folly::Range<char**> groups, VectorPtr& result) {
+          extractForSpill(groups, result);
         },
         [this](folly::Range<char**> groups) {
           for (auto* group : groups) {
@@ -103,6 +103,18 @@ class TypedDistinctAggregations : public DistinctAggregations {
     inputForAccumulator_.reset();
   }
 
+  void addSingleGroupSpillInput(
+      char* group,
+      const VectorPtr& input,
+      vector_size_t index) override {
+    auto* serializedVector = input->asFlatVector<StringView>();
+    VELOX_CHECK_LE(index, serializedVector->size());
+
+    auto* accumulator = reinterpret_cast<AccumulatorType*>(group + offset_);
+    RowSizeTracker<char, uint32_t> tracker(group[rowSizeOffset_], *allocator_);
+    accumulator->deserialize(serializedVector->valueAt(index), allocator_);
+  }
+
   void extractValues(folly::Range<char**> groups, const RowVectorPtr& result)
       override {
     SelectivityVector rows;
@@ -137,6 +149,8 @@ class TypedDistinctAggregations : public DistinctAggregations {
       aggregate.function->destroy(groups);
     }
   }
+
+  void clear() override {}
 
  private:
   bool isSingleInputAggregate() const {
@@ -183,6 +197,17 @@ class TypedDistinctAggregations : public DistinctAggregations {
       return {std::move(input)};
     }
     return input->template asUnchecked<RowVector>()->children();
+  }
+
+  void extractForSpill(folly::Range<char**> groups, VectorPtr& result) const {
+    auto* flat = result->asFlatVector<StringView>();
+    flat->resize(groups.size());
+
+    for (auto i = 0; i < groups.size(); ++i) {
+      auto* accumulator =
+          reinterpret_cast<AccumulatorType*>(groups[i] + offset_);
+      accumulator->serialize(result, i);
+    }
   }
 
   memory::MemoryPool* const pool_;
