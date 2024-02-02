@@ -57,6 +57,14 @@ class AddressableNonNullValueList {
       vector_size_t index,
       HashStringAllocator* allocator);
 
+  /// Append a non-null serialized value to the end of the list.
+  /// Returns Entry (position, size, hash) that can be used to access the
+  /// value later.
+  Entry appendSerialized(
+      const StringView& value,
+      uint64_t hash,
+      HashStringAllocator* allocator);
+
   /// Removes last element. 'position' must be a value returned from the latest
   /// call to 'append'.
   void removeLast(const Entry& entry) {
@@ -77,6 +85,9 @@ class AddressableNonNullValueList {
   static void
   read(const Entry& position, BaseVector& result, vector_size_t index);
 
+  /// Copies to 'dest' entry.size bytes at position.
+  static void copy(const Entry& position, void* dest);
+
   void free(HashStringAllocator& allocator) {
     if (size_ > 0) {
       allocator.free(firstHeader_);
@@ -84,6 +95,8 @@ class AddressableNonNullValueList {
   }
 
  private:
+  void initStream(ByteOutputStream& stream, HashStringAllocator* allocator);
+
   // Memory allocation (potentially multi-part).
   HashStringAllocator::Header* firstHeader_{nullptr};
   HashStringAllocator::Position currentPosition_{nullptr, nullptr};
